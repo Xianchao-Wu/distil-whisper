@@ -779,7 +779,7 @@ def get_parameter_names(model, forbidden_layer_types, forbidden_module=None):
 
 
 def main():
-    # 1. Parse input arguments
+    # 1. Parse input arguments NOTE 解析输入的参数
     # We keep distinct sets of args, for cleaner separation of model/data/training related args
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, DistillationTrainingArguments))
 
@@ -790,7 +790,7 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # 2. Initialize the accelerator
+    # 2. Initialize the accelerator NOTE 初始化“加速器”
     # We will let the accelerator handle device placement for us in this example
     # We simply have to specify the training precision and any trackers being used
     # We'll use the same dtype arguments as our JAX/Flax training script and convert
@@ -821,7 +821,7 @@ def main():
 
     )
 
-    # 3. Set-up basic logging
+    # 3. Set-up basic logging NOTE 设定基本log日志信息
     # Create one log on every process with the configuration for debugging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -843,7 +843,7 @@ def main():
         transformers.utils.logging.set_verbosity_error()
     logger.info("Training/evaluation parameters %s", training_args)
 
-    # 4. Detecting last checkpoint and eventually continue from last checkpoint
+    # 4. Detecting last checkpoint and eventually continue from last checkpoint NOTE 检测是否有已有的ckpt，并继续从其开始继续训练知识整理
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -858,7 +858,7 @@ def main():
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
 
-    # 5. Handle the repository creation
+    # 5. Handle the repository creation NOTE 如果发布到hf，这里就设定一下，否则本地保存即可
     if accelerator.is_main_process:
         if training_args.push_to_hub:
             if training_args.hub_model_id is None:
@@ -877,12 +877,13 @@ def main():
             os.makedirs(training_args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
 
-    # 6. Load dataset - either streaming or non-streaming (offline)
+    # 6. Load dataset - either streaming or non-streaming (offline) NOTE 导入数据集合
     raw_datasets = IterableDatasetDict() if data_args.streaming else DatasetDict()
 
     # set seed for determinism
     set_seed(training_args.seed)
 
+    import ipdb; ipdb.set_trace()
     if training_args.do_train:
         raw_datasets["train"] = load_multiple_datasets(
             data_args.train_dataset_name,
@@ -955,14 +956,16 @@ def main():
         raise ValueError(
             "Cannot not train and not do evaluation. At least one of training or evaluation has to be performed."
         )
-
-    # 7. Load pretrained model, tokenizer, and feature extractor
+    
+    import ipdb;ipdb.set_trace()
+    # 7. Load pretrained model, tokenizer, and feature extractor NOTE 导入已训练模型，tokenizer，以及特征提取器
     config = WhisperConfig.from_pretrained(
         (model_args.config_name if model_args.config_name else model_args.model_name_or_path),
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         token=model_args.token,
     )
+
     feature_extractor = WhisperFeatureExtractor.from_pretrained(
         (model_args.feature_extractor_name if model_args.feature_extractor_name else model_args.model_name_or_path),
         cache_dir=model_args.cache_dir,
@@ -977,12 +980,17 @@ def main():
         token=model_args.token,
     )
 
+    import ipdb; ipdb.set_trace()
+
     # override timestamp tokens until tokenizer issues are fixed in transformers
     timestamps = [AddedToken("<|%.2f|>" % (i * 0.02), lstrip=False, rstrip=False) for i in range(1500 + 1)]
     tokenizer.add_tokens(timestamps)
 
     # The teacher model can safely be cast to the dtype of training since we don't
     # update the params
+    # 导入教师模型：
+    # NOTE
+    import ipdb; ipdb.set_trace()
     teacher_model = WhisperForConditionalGeneration.from_pretrained(
         model_args.teacher_model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -991,7 +999,11 @@ def main():
         torch_dtype=teacher_dtype,
         attn_implementation=model_args.attn_implementation,
     )
+    print(teacher_model)
 
+    # 导入学生模型：
+    # NOTE
+    import ipdb; ipdb.set_trace()
     student_model = WhisperForConditionalGeneration.from_pretrained(
         model_args.model_name_or_path,
         config=config,
@@ -1002,6 +1014,7 @@ def main():
         low_cpu_mem_usage=True,
         attn_implementation=model_args.attn_implementation,
     )
+    print(student_model)
 
     if student_model.config.decoder_start_token_id is None or teacher_model.config.decoder_start_token_id is None:
         raise ValueError(
@@ -1067,6 +1080,7 @@ def main():
         is_multilingual = False
 
     # 8. Create a single speech processor - make sure all processes wait until data is saved
+    # NOTE 创建一个语音处理器:
     if accelerator.is_main_process:
         feature_extractor.save_pretrained(training_args.output_dir)
         tokenizer.save_pretrained(training_args.output_dir)
@@ -1078,7 +1092,7 @@ def main():
     processor = WhisperProcessor.from_pretrained(training_args.output_dir)
 
     # 9. Resample speech dataset: `datasets` takes care of automatically loading and resampling the audio,
-    # so we just need to set the correct target sampling rate.
+    # so we just need to set the correct target sampling rate. NOTE 重新采样speech数据集合
     sampling_rate = feature_extractor.sampling_rate
     raw_datasets = raw_datasets.cast_column(
         data_args.audio_column_name,
@@ -1086,7 +1100,7 @@ def main():
     )
 
     # 10. Preprocessing the datasets: we need to read the audio files as arrays and tokenize the targets.
-    # 10.1: Define the pre-processing constants
+    # 10.1: Define the pre-processing constants NOTE 定义预处理的常数
     max_input_length = int(data_args.max_duration_in_seconds * sampling_rate)
     min_input_length = int(data_args.min_duration_in_seconds * sampling_rate)
     max_label_length = (
@@ -1119,7 +1133,8 @@ def main():
     use_pseudo_labels = data_args.use_pseudo_labels
     train_text_column_name = "whisper_transcript" if use_pseudo_labels else "text"
 
-    # 10.2: filter based on maximum number of training/evaluation samples
+    # 10.2: filter based on maximum number of training/evaluation samples NOTE 根据最大的训练/
+    # 验证样本的数目，来过滤
     if training_args.do_train and data_args.max_train_samples is not None:
         raw_datasets["train"] = (
             raw_datasets["train"].take(data_args.max_train_samples)
@@ -1136,6 +1151,7 @@ def main():
             )
 
     # 10.3: filter training data based on WER threshold -> this is KEY to good distillation performance
+    # NOTE 根据wer的预先设定好的阈值，来对pseudo training data进行过滤
     def is_wer_in_range(ground_truth, whisper_transcript):
         norm_ground_truth = normalizer(ground_truth)
         if whisper_transcript is not None and whisper_transcript.upper() == whisper_transcript:
@@ -1163,7 +1179,7 @@ def main():
                 else filter_by_wer_threshold()
             )
 
-    # 10.4: pre-process training/evaluation datasets
+    # 10.4: pre-process training/evaluation datasets NOTE 预处理一下训练、评估数据集合
     def prepare_train_dataset(batch):
         """
         Pre-process the raw dataset in a three stage process:
@@ -1172,6 +1188,7 @@ def main():
             3. Possibly add prompt tokens if conditioning on previous text (depending on the conditioning probability)
         """
         # process audio input
+        import ipdb; ipdb.set_trace()
         audio = [sample["array"] for sample in batch["audio"]]
         inputs = feature_extractor(audio, sampling_rate=sampling_rate)
         batch["input_features"] = inputs.input_features
@@ -1272,6 +1289,7 @@ def main():
                 )
 
     # 10.5: Filter training data with inputs longer than `max_input_length`
+    # NOTE 根据最长输入长度，来对训练数据进行过滤
     def is_audio_in_length_range(length):
         return min_input_length < length < max_input_length
 
@@ -1286,6 +1304,7 @@ def main():
         )
 
     # 10.6: Filter training data with labels longer than `max_label_length`
+    # NOTE 根据最长标签长度，来对训练数据进行过滤
     def is_labels_in_length_range(labels):
         return 0 < len(labels) <= max_label_length
 
@@ -1316,7 +1335,7 @@ def main():
         logger.info(f"Data preprocessing finished. Files cached at {cache}.")
         return
 
-    # 11. Define Evaluation Metrics
+    # 11. Define Evaluation Metrics NOTE 定义评估打分标准
     def compute_metrics(preds, labels):
         # replace padded labels by the padding token
         for idx in range(len(labels)):
@@ -1340,7 +1359,7 @@ def main():
         wer = 100 * metric.compute(predictions=norm_pred_str, references=norm_label_str)
         return {"wer": wer, "wer_ortho": wer_ortho}, pred_str, label_str, norm_pred_str, norm_label_str
 
-    # 12. Define Training Schedule
+    # 12. Define Training Schedule NOTE 定义训练日程表
     # Store some constants
     per_device_train_batch_size = int(training_args.per_device_train_batch_size)
     train_batch_size = per_device_train_batch_size * accelerator.num_processes
@@ -1372,7 +1391,7 @@ def main():
     else:
         eval_steps = training_args.eval_steps
 
-    # 13. Define optimizer, LR scheduler, collator
+    # 13. Define optimizer, LR scheduler, collator NOTE 定义优化器，LR调度器，以及整理器
     
     forbidden_module = [
         module
@@ -1424,7 +1443,7 @@ def main():
     )
 
     # 14. Define generation arguments - we need to do this before we wrap the models in DDP
-    # so that we can still access the configs
+    # so that we can still access the configs NOTE 定义生成的参数论元
     num_beams = (
         training_args.generation_num_beams
         if training_args.generation_num_beams is not None
@@ -1445,12 +1464,13 @@ def main():
             }
         )
 
-    # 15. Prepare everything with accelerate
+    # 15. Prepare everything with accelerate NOTE 用加速器来准备，学生模型，教师模型，优化器，学习率调度器
     student_model, teacher_model, optimizer, lr_scheduler = accelerator.prepare(
         student_model, teacher_model, optimizer, lr_scheduler
     )
 
     def kl_divergence(target_distribution, log_predicted_distribution, labels):
+        import ipdb; ipdb.set_trace() # NOTE 相当重要的部分，计算KL
         kl_loss = nn.KLDivLoss(reduction="none")
         divergence = kl_loss(log_predicted_distribution, target_distribution)
         # ignore padded tokens from divergence, i.e. where labels are not set to -100
@@ -1469,16 +1489,23 @@ def main():
         student_model.train()
         teacher_model.eval()
 
+        import ipdb; ipdb.set_trace()
+
         student_outputs = student_model(**batch)
+
         with torch.no_grad():
             if share_hidden_states:
                 # if the student and teacher share the same frozen encoder then we don't have to recompute the
                 # encoder hidden-states for the teacher model, we can just re-use from the student
                 encoder_outputs = BaseModelOutput(student_outputs.encoder_last_hidden_state.to(dtype=teacher_dtype))
+                # NOTE 这是直接把学生模型的encoder的输出，赋值给teacher_model作为其encoder_outputs，
+                # 这个好
+                # TODO ,问题在于，这里把labels，传递给教师模型，是个啥意思呢？是要beam search在
+                # 返回的时候，
                 teacher_outputs = teacher_model(encoder_outputs=encoder_outputs, labels=batch["labels"])
             else:
                 # do the full forward pass for the teacher model (encoder + decoder)
-                teacher_outputs = teacher_model(**batch)
+                teacher_outputs = teacher_model(**batch) # NOTE TODO 问题，这里咋就没有传入labels=batch['labels']呢?
 
         # CE (data) loss
         ce_loss = student_outputs.loss
@@ -1487,7 +1514,9 @@ def main():
         # log softmax of student predictions for numerical stability
         student_distribution = nn.functional.log_softmax(student_outputs.logits / temperature, dim=-1)
         # KL-divergence loss (scaled by temperature)
+        # TODO 如果想修改为multi-token prediction下的distilling，那么这里是需要修改的
         kl_loss = kl_divergence(teacher_distribution, student_distribution, batch["labels"]) * temperature**2
+        # NOTE 上面是* T^2，记得论文里面说过的
 
         # use Distil-Whisper formulation (fix weight of CE loss and tune KL weight)
         loss = 0.8 * ce_loss + training_args.kl_weight * kl_loss

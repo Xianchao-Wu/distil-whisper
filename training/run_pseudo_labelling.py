@@ -889,7 +889,9 @@ def main():
         for step, (batch, file_ids) in enumerate(zip(batches, file_loader)):
             # Generate predictions and pad to max generated length
             generate_fn = model.module.generate if accelerator.num_processes > 1 else model.generate
-            generated_ids = generate_fn(batch["input_features"].to(dtype=torch_dtype), **gen_kwargs)
+            import ipdb; ipdb.set_trace()
+            # 真正的调用生成函数，生成target token sequence的过程:
+            generated_ids = generate_fn(batch["input_features"].to(dtype=torch_dtype), **gen_kwargs) # NOTE
             generated_ids = accelerator.pad_across_processes(generated_ids, dim=1, pad_index=tokenizer.pad_token_id)
             # Gather all predictions and targets
             generated_ids, labels = accelerator.gather_for_metrics((generated_ids, batch["labels"]))
@@ -1002,6 +1004,7 @@ def main():
     )
     logger.info(f"  Predict labels with timestamps = {return_timestamps}")
     for split in data_splits:
+        import ipdb; ipdb.set_trace()
         eval_step_with_save(split=split)
         accelerator.wait_for_everyone()
         if training_args.push_to_hub and accelerator.is_main_process:
