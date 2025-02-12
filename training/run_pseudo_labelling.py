@@ -59,6 +59,7 @@ from transformers.models.whisper.english_normalizer import BasicTextNormalizer, 
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
+import ipdb; ipdb.set_trace()
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.34.0.dev0")
@@ -407,7 +408,8 @@ def log_pred(
     num_lines: int = 200000,
 ):
     """Helper function to log target/predicted transcriptions to weights and biases (wandb)."""
-    if accelerator.is_main_process:
+    is_use_wandb = False # TODO
+    if accelerator.is_main_process and is_use_wandb:
         wandb_tracker = accelerator.get_tracker("wandb")
         # pretty name for split
         prefix = prefix.replace("/", "-")
@@ -433,7 +435,7 @@ def log_pred(
 
 
 def main():
-    # 1. Parse input arguments
+    # 1. Parse input arguments NOTE 解析输入的参数论元
     # We keep distinct sets of args, for cleaner separation of model/data/training related args
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, Seq2SeqTrainingArguments))
 
@@ -444,7 +446,7 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # 2. Initialize the accelerator
+    # 2. Initialize the accelerator 初始化加速器 NOTE
     # We will let the accelerator handle device placement for us in this example
     # We simply have to specify the training precision and any trackers being used
     # We'll use the same dtype arguments as our JAX/Flax training script and convert
@@ -471,7 +473,7 @@ def main():
 
     accelerator.init_trackers(project_name=data_args.wandb_project)
 
-    # 3. Set-up basic logging
+    # 3. Set-up basic logging NOTE 设置基本的logging
     # Create one log on every process with the configuration for debugging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -493,7 +495,7 @@ def main():
         transformers.utils.logging.set_verbosity_error()
     logger.info("Training/evaluation parameters %s", training_args)
 
-    # 3. Load dataset
+    # 3. Load dataset 导入数据集合 NOTE
     raw_datasets = IterableDatasetDict() if data_args.streaming else DatasetDict()
     token = model_args.token if model_args.token is not None else HfFolder().get_token()
 
@@ -526,19 +528,24 @@ def main():
             f" {', '.join(next(iter(raw_datasets.values())).column_names)}."
         )
     
-    # 7. Load pretrained model, tokenizer, and feature extractor
+    # 7. Load pretrained model, tokenizer, and feature extractor NOTE 导入预训练好的模型，tokenizer，以及特征提取器
+    import ipdb; ipdb.set_trace()
     config = WhisperConfig.from_pretrained(
         (model_args.config_name if model_args.config_name else model_args.model_name_or_path),
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         token=token,
     )
+    print(config)
+
     feature_extractor = WhisperFeatureExtractor.from_pretrained(
         (model_args.feature_extractor_name if model_args.feature_extractor_name else model_args.model_name_or_path),
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         token=token,
     )
+    print(feature_extractor)
+
     tokenizer = WhisperTokenizerFast.from_pretrained(
         (model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path),
         cache_dir=model_args.cache_dir,
@@ -546,13 +553,16 @@ def main():
         revision=model_args.model_revision,
         token=token,
     )
+    print(tokenizer)
+
     processor = WhisperProcessor.from_pretrained(
         (model_args.processor_name if model_args.processor_name else model_args.model_name_or_path),
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         token=token,
     )
-
+    print(processor)
+    
     model = WhisperForConditionalGeneration.from_pretrained(
         model_args.model_name_or_path,
         config=config,
@@ -565,6 +575,7 @@ def main():
         attn_implementation=model_args.attn_implementation,
     )
     model.eval()
+    print(model)
 
     if model.config.decoder_start_token_id is None:
         raise ValueError("Make sure that `config.decoder_start_token_id` is correctly defined")
