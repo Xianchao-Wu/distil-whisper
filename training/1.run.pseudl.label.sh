@@ -18,6 +18,7 @@ cache="/workspace/asr/distil-whisper/training/"
 #python -m ipdb run_pseudo_labelling.py \
 #python run_pseudo_labelling.py \
 
+#--concatenate_audio \
 #accelerate launch run_pseudo_labelling.py \
 python -m ipdb run_pseudo_labelling.py \
   --model_name_or_path "openai/whisper-large-v3" \
@@ -34,12 +35,12 @@ python -m ipdb run_pseudo_labelling.py \
   --attn_implementation "sdpa" \
   --logging_steps 500 \
   --max_label_length 256 \
-  --concatenate_audio \
   --preprocessing_batch_size 256 \
   --preprocessing_num_workers 8 \
   --dataloader_num_workers 8 \
   --language $lang \
   --task "transcribe" \
+  --concatenate_audio \
   --return_timestamps \
   --streaming False \
   --report_to "none" \
