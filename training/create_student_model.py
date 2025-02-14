@@ -290,8 +290,8 @@ def init_student_model_from_teacher(
     generation_config.forced_decoder_ids = None
 
     teacher_config = teacher_model.config
-    teacher_encoder_layers = teacher_config.encoder_layers
-    teacher_decoder_layers = teacher_config.decoder_layers
+    teacher_encoder_layers = teacher_config.encoder_layers # 32
+    teacher_decoder_layers = teacher_config.decoder_layers # 32
 
     student_config = copy.deepcopy(teacher_config)
     student_config.update(
@@ -322,9 +322,9 @@ def init_student_model_from_teacher(
     import ipdb; ipdb.set_trace() # 根据学生模型的配置文件，构造学生模型:
     # TODO
     student_model = WhisperForConditionalGeneration(student_config)
-
+    # NOTE /usr/local/lib/python3.10/dist-packages/transformers/models/whisper/modeling_whisper.py
     import ipdb; ipdb.set_trace()
-    student_model_mtp = StudentModelMTP(student_model, student_config, vocab_size=12800, num_mtp_tokens=3)
+    #student_model_mtp = StudentModelMTP(student_model, student_config, vocab_size=12800, num_mtp_tokens=3)
 
     import ipdb; ipdb.set_trace() # 根据教师网络的ckpt state dict，构造学生模型的一些位置的参数的取值:
     missing_keys, unexpected_keys = student_model.load_state_dict(teacher_model.state_dict(), strict=False)
@@ -368,7 +368,8 @@ def init_student_model_from_teacher(
 
     import ipdb; ipdb.set_trace() # 保存学生模型ckpt到本地的hard space
     # save the converted weights and model
-    if save_dir is not None:
+    is_save_student = False # NOTE TODO
+    if is_save_student and save_dir is not None:
         student_model.save_pretrained(save_dir)
         # we also need to correctly save the processor and generation config
         processor.save_pretrained(save_dir)
@@ -377,24 +378,55 @@ def init_student_model_from_teacher(
     # check we can do a forward pass with the saved model - first load the weights and processor
     logger.info("Checking we can load the saved model...")
     student_model = WhisperForConditionalGeneration.from_pretrained(
-        save_dir,
+        save_dir, # './distil-large-v3-init'
         low_cpu_mem_usage=True,
     )
     processor = WhisperProcessor.from_pretrained(save_dir)
 
     # define some random inputs
     input_features = processor(np.ones(16000), sampling_rate=16000, return_tensors="pt").input_features
-    decoder_start_token_id = student_model.config.decoder_start_token_id
+    decoder_start_token_id = student_model.config.decoder_start_token_id # 50258
     decoder_input_ids = torch.ones((input_features.shape[0], 1), dtype=torch.long) * decoder_start_token_id
 
     import ipdb; ipdb.set_trace()
     # do a forward pass - outputs will be gibberish for the initialised model so we can't check them
     # but we make can sure the model runs as expected
     logger.info("Checking if we can run the converted model forward...")
-    _ = student_model(input_features, decoder_input_ids=decoder_input_ids).logits
+
+    import ipdb; ipdb.set_trace() # TODO NOTE
+    _ = student_model(input_features, decoder_input_ids=decoder_input_ids).logits # NOTE TODO check the detail of the output of the student model here!
+    '''
+    odict_keys(['logits', 'past_key_values', 'encoder_last_hidden_state'])
+    ipdb> smout['logits'].shape
+torch.Size([1, 1, 51866])
+ipdb> len(smout['past_key_values'])
+2
+ipdb> smout['past_key_values'][0].shape
+ipdb> len(smout['past_key_values'][0])
+4 : decoder-self-attn-key-cache, decoder-self-attn-value-cache, decoder-cross-attn-key-cache, decoder-cross-attn-value-cache 
+totally 2 decoder layers, each layer is with 4 kvcache tensors NOTE
+ipdb> smout['past_key_values'][0][0]
+tensor([[[[ 0.1925, -0.6320,  0.7088,  ...,  0.2387,  0.2302,  0.5410]],
+
+         [[-0.9089,  0.9011, -0.7601,  ...,  0.0793, -0.4765, -0.5775]],
+
+         [[ 0.9323,  0.5366,  0.7171,  ..., -0.8225,  0.0128,  0.8300]],
+
+         ...,
+
+         [[ 0.0064,  1.0563, -0.2240,  ...,  0.9675,  0.0261,  1.0380]],
+
+         [[-0.9611,  0.9479,  0.8635,  ..., -0.8018, -0.9512,  0.7421]],
+
+         [[ 0.6124,  0.5573,  0.5833,  ...,  0.8053, -0.6511,  0.8537]]]],
+       grad_fn=<TransposeBackward0>)
+ipdb> smout['encoder_last_hidden_state'].shape
+torch.Size([1, 1500, 1280])
+
+    '''
     logger.info("Conversion successful!")
 
-    if push_to_hub:
+    if push_to_hub: # False
         student_model.push_to_hub(save_dir)
         processor.push_to_hub(save_dir)
         generation_config.push_to_hub(save_dir)
@@ -403,7 +435,7 @@ def init_student_model_from_teacher(
 if __name__ == "__main__":
     args = parse_args()
     import ipdb; ipdb.set_trace()
-    print(args)
+    print(args) # Namespace(teacher_checkpoint='openai/whisper-large-v3', subfolder='', encoder_layers=32, decoder_layers=2, decoder_layers_numbers=None, save_dir='./distil-large-v3-init', push_to_hub=False, cache_dir=None)
 
     init_student_model_from_teacher(
         teacher_checkpoint=args.teacher_checkpoint,

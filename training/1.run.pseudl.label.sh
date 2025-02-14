@@ -20,7 +20,9 @@ cache="/workspace/asr/distil-whisper/training/"
 
 #--concatenate_audio \
 #accelerate launch run_pseudo_labelling.py \
-python -m ipdb run_pseudo_labelling.py \
+#python -m ipdb run_pseudo_labelling.py \
+
+accelerate launch run_pseudo_labelling.py \
   --model_name_or_path "openai/whisper-large-v3" \
   --dataset_name "mozilla-foundation/common_voice_16_1" \
   --dataset_config_name $lang \

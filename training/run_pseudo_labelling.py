@@ -59,7 +59,7 @@ from transformers.models.whisper.english_normalizer import BasicTextNormalizer, 
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
-import ipdb; ipdb.set_trace()
+#import ipdb; ipdb.set_trace()
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.34.0.dev0")
@@ -547,14 +547,14 @@ def main():
         )
     
     # 7. Load pretrained model, tokenizer, and feature extractor NOTE 导入预训练好的模型，tokenizer，以及特征提取器
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     config = WhisperConfig.from_pretrained(
         (model_args.config_name if model_args.config_name else model_args.model_name_or_path), # 'openai/whisper-large-v3'
         cache_dir=model_args.cache_dir, # '/workspace/asr/distil-whisper/training/'
         revision=model_args.model_revision, # 'main'
         token=token, # my hf's token
     )
-    print(config)
+    #print(config)
     '''
     WhisperConfig {
       "_name_or_path": "openai/whisper-large-v3",
@@ -614,7 +614,7 @@ def main():
         revision=model_args.model_revision,
         token=token,
     )
-    print(feature_extractor)
+    #print(feature_extractor)
     '''
     loading configuration file preprocessor_config.json from cache at /workspace/asr/distil-whisper/training/models--openai--whisper-large-v3/snapshots/06f233fe06e710322aca913c1bc4249a0d71fce1/preprocessor_config.json
     Feature extractor WhisperFeatureExtractor {
@@ -640,7 +640,7 @@ def main():
         revision=model_args.model_revision,
         token=token,
     )
-    print(tokenizer)
+    #print(tokenizer)
     '''WhisperTokenizerFast(name_or_path='openai/whisper-large-v3', vocab_size=50257, model_max_length=1000000000000000019884624838656, is_fast=True, padding_side='right', truncation_side='right', special_tokens={'bos_token': '<|endoftext|>', 'eos_token': '<|endoftext|>', 'unk_token': '<|endoftext|>', 'pad_token': '<|endoftext|>', 'additional_special_tokens': ['<|startoftranscript|>', '<|en|>', '<|zh|>', '<|de|>', '<|es|>', '<|ru|>', '<|ko|>', '<|fr|>', '<|ja|>', '<|pt|>', '<|tr|>', '<|pl|>', '<|ca|>', '<|nl|>', '<|ar|>', '<|sv|>', '<|it|>', '<|id|>', '<|hi|>', '<|fi|>', '<|vi|>', '<|he|>', '<|uk|>', '<|el|>', '<|ms|>', '<|cs|>', '<|ro|>', '<|da|>', '<|hu|>', '<|ta|>', '<|no|>', '<|th|>', '<|ur|>', '<|hr|>', '<|bg|>', '<|lt|>', '<|la|>', '<|mi|>', '<|ml|>', '<|cy|>', '<|sk|>', '<|te|>', '<|fa|>', '<|lv|>', '<|bn|>', '<|sr|>', '<|az|>', '<|sl|>', '<|kn|>', '<|et|>', '<|mk|>', '<|br|>', '<|eu|>', '<|is|>', '<|hy|>', '<|ne|>', '<|mn|>', '<|bs|>', '<|kk|>', '<|sq|>', '<|sw|>', '<|gl|>', '<|mr|>', '<|pa|>', '<|si|>', '<|km|>', '<|sn|>', '<|yo|>', '<|so|>', '<|af|>', '<|oc|>', '<|ka|>', '<|be|>', '<|tg|>', '<|sd|>', '<|gu|>', '<|am|>', '<|yi|>', '<|lo|>', '<|uz|>', '<|fo|>', '<|ht|>', '<|ps|>', '<|tk|>', '<|nn|>', '<|mt|>', '<|sa|>', '<|lb|>', '<|my|>', '<|bo|>', '<|tl|>', '<|mg|>', '<|as|>', '<|tt|>', '<|haw|>', '<|ln|>', '<|ha|>', '<|ba|>', '<|jw|>', '<|su|>', '<|yue|>', '<|translate|>', '<|transcribe|>', '<|startoflm|>', '<|startofprev|>', '<|nospeech|>', '<|notimestamps|>']}, clean_up_tokenization_spaces=True),  added_tokens_decoder={
             50257: AddedToken("<|endoftext|>", rstrip=False, lstrip=False, single_word=False, normalized=False, special=True),
             50258: AddedToken("<|startoftranscript|>", rstrip=False, lstrip=False, single_word=False, normalized=False, special=True),
@@ -665,7 +665,7 @@ def main():
         revision=model_args.model_revision,
         token=token,
     )
-    print(processor)
+    #print(processor)
     '''
     WhisperProcessor:
     - feature_extractor: WhisperFeatureExtractor { ...
@@ -688,7 +688,7 @@ def main():
         attn_implementation=model_args.attn_implementation, # 'sdpa' scaled dot product attention
     )
     model.eval()
-    print(model)
+    #print(model)
     '''
     loading weights file model.safetensors from cache at /workspace/asr/distil-whisper/training/models--openai--whisper-large-v3/snapshots/06f233fe06e710322aca913c1bc4249a0d71fce1/model.safetensors
 Instantiating WhisperForConditionalGeneration model under default dtype torch.bfloat16.
@@ -788,7 +788,7 @@ Generate config GenerationConfig {
         datasets.features.Audio(sampling_rate=feature_extractor.sampling_rate), # 16000
     ) # TODO 给音频信息一些处理, Audio(sampling_rate=16000, mono=True, decode=True, id=None)
     
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     # 7. Preprocessing the datasets.
     # We need to read the audio files as arrays and tokenize the targets.
     max_input_length = int(data_args.max_duration_in_seconds * feature_extractor.sampling_rate) # 30.0 * 16000=480000
@@ -1048,19 +1048,19 @@ Generate config GenerationConfig {
 
     def compute_metrics(preds, labels, file_ids):
         # replace padded labels by the padding token
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         for idx in range(len(labels)):
-            labels[idx][labels[idx] == -100] = tokenizer.pad_token_id
+            labels[idx][labels[idx] == -100] = tokenizer.pad_token_id # ref label's pad_id from -100 to 50257 
 
         pred_str = tokenizer.batch_decode(preds, skip_special_tokens=False, decode_with_timestamps=return_timestamps)
-        print('pred:', pred_str)
+        #print('pred:', pred_str) # pred_str[0] = '<|startoftranscript|><|ja|><|transcribe|><|0.60|>我々の自己は、かかる矛盾的自己同一的に<|3.88|><|3.88|>ハンバーグが焦げたので、タレでごまかす<|8.32|><|8.32|>著作権が切れたような古い文章にある言葉を、普段の会話に使っているのか<|13.22|><|13.22|>とにかく世界観が素晴らしい<|16.20|><|16.20|>もし全く知らないならば、人は哲学を求めることもしないであろう<|21.00|><|21.00|>しかし他を否定する位置は、それ自身が矛盾でなければならない<|25.88|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|><|endoftext|>'
         # we do not want to group tokens when computing the metrics
         label_str = tokenizer.batch_decode(labels, skip_special_tokens=True)
-        print('ref:', label_str)
+        #print('ref:', label_str) # label_str[0] = '我々の自己はかかる矛盾的自己同一的に ハンバーグが焦げたのでタレでごまかす 著作権が切れたような古い文章にある言葉を、普段の会話に使っているのか とにかく世界観が素晴らしい もし全く知らないならば、ひとは哲学を求めることもしないであろう。 しかし多を否定する一は、それ自身が矛盾でなければならない。'
 
         # normalize everything and re-compute the WER
-        norm_pred_str = [normalizer(pred) for pred in pred_str]
-        norm_label_str = [normalizer(label) for label in label_str]
+        norm_pred_str = [normalizer(pred) for pred in pred_str] # norm_pred_str[0]='我々の自己は かかる矛盾的自己同一的にハンバーグが焦げたので タレでごまかす著作権が切れたような古い文章にある言葉を 普段の会話に使っているのかとにかく世界観が素晴らしいもし全く知らないならば 人は哲学を求めることもしないであろうしかし他を否定する位置は それ自身が矛盾でなければならない'
+        norm_label_str = [normalizer(label) for label in label_str] # norm_label_str[0]='我々の自己はかかる矛盾的自己同一的に ハンバーグが焦げたのでタレでごまかす 著作権が切れたような古い文章にある言葉を 普段の会話に使っているのか とにかく世界観が素晴らしい もし全く知らないならば ひとは哲学を求めることもしないであろう しかし多を否定する一は それ自身が矛盾でなければならない '
         # for logging, we need the pred/labels to match the norm_pred/norm_labels, so discard any filtered samples here
         pred_str = [pred_str[i] for i in range(len(norm_pred_str)) if len(norm_label_str[i]) > 0]
         label_str = [label_str[i] for i in range(len(norm_label_str)) if len(norm_label_str[i]) > 0]
@@ -1068,11 +1068,18 @@ Generate config GenerationConfig {
         # filtering step to only evaluate the samples that correspond to non-zero normalized references:
         norm_pred_str = [norm_pred_str[i] for i in range(len(norm_pred_str)) if len(norm_label_str[i]) > 0]
         norm_label_str = [norm_label_str[i] for i in range(len(norm_label_str)) if len(norm_label_str[i]) > 0]
-        print('norm_pred:', norm_pred_str)
-        print('norm_label:', norm_label_str)
+        #print('norm_pred:', norm_pred_str)
+        #print('norm_label:', norm_label_str)
 
-        wer = 100 * metric.compute(predictions=norm_pred_str, references=norm_label_str)
+        is_cer = True
+        if is_cer:
+            norm_pred_str_cer = [' '.join(list(aitem)) for aitem in norm_pred_str]
+            norm_label_str_cer = [' '.join(list(aitem)) for aitem in norm_label_str]
+            wer = 100 * metric.compute(predictions=norm_pred_str_cer, references=norm_label_str_cer)
+        else:
+            wer = 100 * metric.compute(predictions=norm_pred_str, references=norm_label_str)
 
+        #import ipdb; ipdb.set_trace()
         return {"wer": wer}, pred_str, label_str, norm_pred_str, norm_label_str, file_ids
 
     def filter_eot_tokens(preds):
@@ -1124,7 +1131,7 @@ Generate config GenerationConfig {
 
     def eval_step_with_save(split="eval"):
         # ======================== Evaluating ==============================
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         eval_preds = []
         eval_labels = []
         eval_ids = []
@@ -1154,7 +1161,7 @@ Generate config GenerationConfig {
         for step, (batch, file_ids) in enumerate(zip(batches, file_loader)):
             # Generate predictions and pad to max generated length
             generate_fn = model.module.generate if accelerator.num_processes > 1 else model.generate
-            import ipdb; ipdb.set_trace()
+            #import ipdb; ipdb.set_trace()
             # 真正的调用生成函数，生成target token sequence的过程:
             generated_ids = generate_fn(batch["input_features"].to(dtype=torch_dtype), **gen_kwargs) # NOTE fp32 -> bf16 NOTE NOTE NOTE
             generated_ids = accelerator.pad_across_processes(generated_ids, dim=1, pad_index=tokenizer.pad_token_id) # tensor with shape=[64,169]
@@ -1165,7 +1172,7 @@ Generate config GenerationConfig {
             eval_ids.extend(file_ids)
 
             # TODO added for debug only:
-            import ipdb; ipdb.set_trace()
+            #import ipdb; ipdb.set_trace()
             wer_metric, pred_str, label_str, norm_pred_str, norm_label_str, eval_ids = compute_metrics(
                 eval_preds, eval_labels, eval_ids
             )
@@ -1275,7 +1282,7 @@ Generate config GenerationConfig {
     )
     logger.info(f"  Predict labels with timestamps = {return_timestamps}")
     for split in data_splits:
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         eval_step_with_save(split=split)
         accelerator.wait_for_everyone()
         if training_args.push_to_hub and accelerator.is_main_process:
