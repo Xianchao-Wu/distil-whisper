@@ -1021,7 +1021,8 @@ Generate config GenerationConfig {
     accelerator.wait_for_everyone()
 
     # 8. Load Metric
-    metric = evaluate.load("wer")
+    #metric = evaluate.load("wer")
+    metric = evaluate.load("cer") # TODO
     '''
     EvaluationModule(name: "wer", module_type: "metric", features: {'predictions': Value(dtype='string', id='sequence'), 'references': Value(dtype='string', id='sequence')}, usage: """
     Compute WER score of transcribed segments against references.
@@ -1080,7 +1081,7 @@ Generate config GenerationConfig {
             wer = 100 * metric.compute(predictions=norm_pred_str, references=norm_label_str)
 
         #import ipdb; ipdb.set_trace()
-        return {"wer": wer}, pred_str, label_str, norm_pred_str, norm_label_str, file_ids
+        return {"cer": wer}, pred_str, label_str, norm_pred_str, norm_label_str, file_ids
 
     def filter_eot_tokens(preds):
         for idx in range(len(preds)):

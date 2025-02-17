@@ -509,7 +509,8 @@ def log_pred(
     num_lines: int = 200000,
 ):
     """Helper function to log target/predicted transcriptions to weights and biases (wandb)."""
-    if accelerator.is_main_process:
+    is_wandb = False
+    if is_wandb and accelerator.is_main_process:
         wandb_tracker = accelerator.get_tracker("wandb")
         # pretty name for current step: step 50000 -> step 50k
         cur_step_pretty = f"{int(step // 1000)}k" if step > 1000 else step
@@ -553,7 +554,7 @@ def convert_dataset_str_to_list(
     if isinstance(dataset_names, str):
         dataset_names = dataset_names.split("+")
         dataset_config_names = dataset_config_names.split("+") if dataset_config_names is not None else None
-        splits = splits.split("+") if splits is not None else None
+        splits = splits.split("+") if splits is not None else None # ['train', 'validation']
         text_column_names = text_column_names.split("+") if text_column_names is not None else None
         dataset_samples = dataset_samples.split("+") if dataset_samples is not None else None
 
@@ -623,11 +624,11 @@ def load_multiple_datasets(
 ) -> IterableDataset:
     dataset_names_dict = convert_dataset_str_to_list(
         dataset_names, dataset_config_names, splits, text_column_names, dataset_samples
-    )
+    ) # [{'name': './common_voice_16_1_ja_pseudo_labelled_good', 'config': 'default', 'split': 'train', 'text_column_name': 'sentence', 'samples': 7.0}, {'name': './common_voice_16_1_ja_pseudo_labelled_good', 'config': 'default', 'split': 'validation', 'text_column_name': 'sentence', 'samples': 4.0}]
 
-    if dataset_samples is not None:
-        dataset_samples = [ds_dict["samples"] for ds_dict in dataset_names_dict]
-        probabilities = np.array(dataset_samples) / np.sum(dataset_samples)
+    if dataset_samples is not None: # '7+4'
+        dataset_samples = [ds_dict["samples"] for ds_dict in dataset_names_dict] # [7.0, 4.0]
+        probabilities = np.array(dataset_samples) / np.sum(dataset_samples) # array([0.63636364, 0.36363636])
     else:
         probabilities = None
 
@@ -668,14 +669,14 @@ def load_multiple_datasets(
                     "pseudo-labels are present in the dataset under this column name, or train directly on the text "
                     "labels by setting `--use_pseudo_labels=False` and defining the appropriate `--text_column_name`."
                 )
-            columns_to_keep.add("whisper_transcript")
+            columns_to_keep.add("whisper_transcript") # {'text', 'whisper_transcript', 'audio'}
 
         if "condition_on_prev" in dataset_features:
-            columns_to_keep.add("condition_on_prev")
+            columns_to_keep.add("condition_on_prev") # {'text', 'condition_on_prev', 'whisper_transcript', 'audio'}
 
-        dataset_features = dataset.features.keys()
+        dataset_features = dataset.features.keys() # dict_keys(['path', 'audio', 'text', 'condition_on_prev', 'whisper_transcript'])
         dataset = dataset.remove_columns(set(dataset_features - columns_to_keep))
-        all_datasets.append(dataset)
+        all_datasets.append(dataset) # Dataset({    features: ['audio', 'text', 'condition_on_prev', 'whisper_transcript'], num_rows: 1737 }); 1062; for train and validation, respectively
 
     if len(all_datasets) == 1:
         # we have a single dataset so just return it as is
@@ -691,7 +692,7 @@ def load_multiple_datasets(
     else:
         interleaved_dataset = concatenate_datasets(all_datasets)
 
-    return interleaved_dataset
+    return interleaved_dataset # 合并了train和validation, 1737+1062=2799 samples now.
 
 
 def sorted_checkpoints(output_dir=None, checkpoint_prefix="checkpoint") -> List[str]:
@@ -799,7 +800,7 @@ def main():
         mixed_precision = "fp16"
         teacher_dtype = torch.float16
     elif training_args.dtype == "bfloat16":
-        mixed_precision = "bf16"
+        mixed_precision = "bf16" # here
         teacher_dtype = torch.bfloat16
     else:
         mixed_precision = "no"
@@ -844,6 +845,7 @@ def main():
     logger.info("Training/evaluation parameters %s", training_args)
 
     # 4. Detecting last checkpoint and eventually continue from last checkpoint NOTE 检测是否有已有的ckpt，并继续从其开始继续训练知识整理
+    #import ipdb; ipdb.set_trace()
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -857,6 +859,7 @@ def main():
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
+    #import ipdb; ipdb.set_trace()
 
     # 5. Handle the repository creation NOTE 如果发布到hf，这里就设定一下，否则本地保存即可
     if accelerator.is_main_process:
@@ -873,7 +876,7 @@ def main():
             with open(os.path.join(training_args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "wandb" not in gitignore:
                     gitignore.write("wandb\n")
-        elif training_args.output_dir is not None:
+        elif training_args.output_dir is not None: # './'
             os.makedirs(training_args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
 
@@ -883,24 +886,24 @@ def main():
     # set seed for determinism
     set_seed(training_args.seed)
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if training_args.do_train:
         raw_datasets["train"] = load_multiple_datasets(
-            data_args.train_dataset_name,
-            data_args.train_dataset_config_name,
-            splits=data_args.train_split_name,
-            text_column_names=data_args.text_column_name,
-            use_pseudo_labels=data_args.use_pseudo_labels,
-            streaming=data_args.streaming,
-            dataset_samples=data_args.train_dataset_samples,
+            data_args.train_dataset_name, # './common_voice_16_1_ja_pseudo_labelled_good+./common_voice_16_1_ja_pseudo_labelled_good'
+            data_args.train_dataset_config_name, # None
+            splits=data_args.train_split_name, # 'train+validation'
+            text_column_names=data_args.text_column_name, # 'sentence+sentence'
+            use_pseudo_labels=data_args.use_pseudo_labels, # True
+            streaming=data_args.streaming, # False
+            dataset_samples=data_args.train_dataset_samples, # '7+4'
             seed=training_args.seed,
             accelerator=accelerator,
             cache_dir=data_args.dataset_cache_dir,
             token=model_args.token,
-        )
-        raw_datasets_train_features = list(raw_datasets["train"].features.keys())
+        ) # 2799 samples, combined 'train' and 'validation' sets together
+        raw_datasets_train_features = list(raw_datasets["train"].features.keys()) # ['audio', 'text', 'condition_on_prev', 'whisper_transcript']
 
-    if training_args.do_eval:
+    if training_args.do_eval: # True
         dataset_names_dict = convert_dataset_str_to_list(
             data_args.eval_dataset_name if data_args.eval_dataset_name else data_args.train_dataset_name,
             (
@@ -910,7 +913,7 @@ def main():
             ),
             splits=data_args.eval_split_name,
             text_column_names=data_args.eval_text_column_name,
-        )
+        ) # [{'name': './common_voice_16_1_ja_pseudo_labelled_good', 'config': 'default', 'split': 'test', 'text_column_name': 'sentence', 'samples': None}]
         all_eval_splits = []
         if len(dataset_names_dict) == 1:
             # load a single eval set
@@ -919,13 +922,13 @@ def main():
             raw_datasets["eval"] = load_dataset(
                 dataset_dict["name"],
                 dataset_dict["config"],
-                split=dataset_dict["split"],
+                split=dataset_dict["split"], # 'test'
                 cache_dir=data_args.dataset_cache_dir,
                 token=model_args.token,
                 streaming=data_args.streaming,
             )
             if data_args.eval_text_column_name != "text":
-                raw_datasets["eval"] = raw_datasets["eval"].rename_column(data_args.eval_text_column_name, "text")
+                raw_datasets["eval"] = raw_datasets["eval"].rename_column(data_args.eval_text_column_name, "text") # NOTE here, 'train' is with 2799 samples and 'eval' is with 1206 samples.
         else:
             # load multiple eval sets
             for dataset_dict in dataset_names_dict:
@@ -956,8 +959,21 @@ def main():
         raise ValueError(
             "Cannot not train and not do evaluation. At least one of training or evaluation has to be performed."
         )
+    '''
+    ipdb> raw_datasets
+DatasetDict({
+    train: Dataset({
+        features: ['audio', 'text', 'condition_on_prev', 'whisper_transcript'],
+        num_rows: 2799
+    })
+    eval: Dataset({
+        features: ['path', 'audio', 'text', 'condition_on_prev', 'whisper_transcript'],
+        num_rows: 1206
+    })
+})
+    '''
     
-    import ipdb;ipdb.set_trace()
+    #import ipdb;ipdb.set_trace()
     # 7. Load pretrained model, tokenizer, and feature extractor NOTE 导入已训练模型，tokenizer，以及特征提取器
     config = WhisperConfig.from_pretrained(
         (model_args.config_name if model_args.config_name else model_args.model_name_or_path),
@@ -980,43 +996,43 @@ def main():
         token=model_args.token,
     )
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
     # override timestamp tokens until tokenizer issues are fixed in transformers
-    timestamps = [AddedToken("<|%.2f|>" % (i * 0.02), lstrip=False, rstrip=False) for i in range(1500 + 1)]
+    timestamps = [AddedToken("<|%.2f|>" % (i * 0.02), lstrip=False, rstrip=False) for i in range(1500 + 1)] # <|0.00|> to <|30.00|>, with 1501 elements in total.
     tokenizer.add_tokens(timestamps)
 
     # The teacher model can safely be cast to the dtype of training since we don't
     # update the params
     # 导入教师模型：
     # NOTE
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     teacher_model = WhisperForConditionalGeneration.from_pretrained(
-        model_args.teacher_model_name_or_path,
-        cache_dir=model_args.cache_dir,
+        model_args.teacher_model_name_or_path, # 'openai/whisper-large-v3'
+        cache_dir=model_args.cache_dir, # '/workspace/asr/distil-whisper/training/'
         token=model_args.token,
         low_cpu_mem_usage=True,
-        torch_dtype=teacher_dtype,
-        attn_implementation=model_args.attn_implementation,
+        torch_dtype=teacher_dtype, # torch.bfloat16
+        attn_implementation=model_args.attn_implementation, # 'sdpa'
     )
-    print(teacher_model)
+    print(teacher_model) # 1,541,570,560
 
     # 导入学生模型：
     # NOTE
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     student_model = WhisperForConditionalGeneration.from_pretrained(
-        model_args.model_name_or_path,
+        model_args.model_name_or_path, # './distil-large-v3-init'
         config=config,
         cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
+        revision=model_args.model_revision, # 'main'
         subfolder=model_args.subfolder,
         token=model_args.token,
         low_cpu_mem_usage=True,
-        attn_implementation=model_args.attn_implementation,
+        attn_implementation=model_args.attn_implementation, # 'sdpa'
     )
-    print(student_model)
+    print(student_model) # 754,485,760 is with 48.9% of its teacher_model (half size)
 
-    if student_model.config.decoder_start_token_id is None or teacher_model.config.decoder_start_token_id is None:
+    if student_model.config.decoder_start_token_id is None or teacher_model.config.decoder_start_token_id is None: # 50258=<bos> of the decoder side
         raise ValueError(
             f"Make sure that `config.decoder_start_token_id` is correctly defined for both the "
             f"student and teacher model. Got {student_model.config.decoder_start_token_id} for the "
@@ -1033,11 +1049,11 @@ def main():
         module._requires_grad = requires_grad
 
     # freeze student encoder if necessary
-    if training_args.freeze_encoder:
+    if training_args.freeze_encoder: # True
         set_trainable_parameters(student_model.model.encoder, requires_grad=False)
         student_model.model.encoder.gradient_checkpointing = False
     
-    if training_args.freeze_decoder:
+    if training_args.freeze_decoder: # False
         set_trainable_parameters(student_model.model.decoder, requires_grad=False)
         student_model.model.decoder.gradient_checkpointing = False
         # un-freeze LM head parameters (and consequently word embeddings), frozen when frozing decoder since tied word embedding and LM head
@@ -1047,7 +1063,7 @@ def main():
     if training_args.freeze_embed_positions:
         # set_trainable_parameters(student_model.model.decoder.embed_tokens, requires_grad=False)
         set_trainable_parameters(student_model.model.decoder.embed_positions, requires_grad=False)
-        if student_model.model.decoder.gradient_checkpointing:
+        if student_model.model.decoder.gradient_checkpointing: # True
             logger.info(
                 "Disabling gradient checkpointing in the decoder since it's incompatible with `freeze_embed_positions`."
             )
@@ -1057,14 +1073,14 @@ def main():
     )
 
     share_hidden_states = training_args.freeze_encoder and student_model.config.d_model == teacher_model.config.d_model
-    if share_hidden_states:
+    if share_hidden_states: # True
         # tie the weights for the teacher encoder if we're freezing the student and it's the same as the teacher
-        teacher_model.model.encoder = student_model.model.encoder
+        teacher_model.model.encoder = student_model.model.encoder # TODO 不是反过来吗? 之前在创建student_model的时候，其parameter weight已经和teacher_model一样了.
 
     if hasattr(teacher_model.generation_config, "is_multilingual") and teacher_model.generation_config.is_multilingual:
         # We need to set the language and task ids for previously multilingual checkpoints
-        is_multilingual = True
-        tokenizer.set_prefix_tokens(language=data_args.language, task=data_args.task, predict_timestamps=False)
+        is_multilingual = True # NOTE here true
+        tokenizer.set_prefix_tokens(language=data_args.language, task=data_args.task, predict_timestamps=False) # 'ja'
         student_model.generation_config.update(
             **{
                 "language": data_args.language,
@@ -1097,17 +1113,17 @@ def main():
     raw_datasets = raw_datasets.cast_column(
         data_args.audio_column_name,
         datasets.features.Audio(sampling_rate=sampling_rate),
-    )
+    ) # 'train': 2799, 'eval': 1206
 
     # 10. Preprocessing the datasets: we need to read the audio files as arrays and tokenize the targets.
     # 10.1: Define the pre-processing constants NOTE 定义预处理的常数
-    max_input_length = int(data_args.max_duration_in_seconds * sampling_rate)
-    min_input_length = int(data_args.min_duration_in_seconds * sampling_rate)
+    max_input_length = int(data_args.max_duration_in_seconds * sampling_rate) # 480,000
+    min_input_length = int(data_args.min_duration_in_seconds * sampling_rate) # 0
     max_label_length = (
         data_args.max_label_length if data_args.max_label_length is not None else student_model.config.max_length
-    )
+    ) # 448
 
-    timestamp_probability = data_args.timestamp_probability
+    timestamp_probability = data_args.timestamp_probability # 0.2
     condition_on_prev_probability = data_args.condition_on_prev_probability
     return_timestamps = data_args.return_timestamps if timestamp_probability > 0 else False
 
@@ -1115,22 +1131,23 @@ def main():
     timestamp_begin = tokenizer.all_special_ids[-1]
     timestamp_position = 3 if is_multilingual else 1
 
-    decoder_start_token_id = student_model.config.decoder_start_token_id  # <|startoftranscript|>
-    decoder_prev_token_id = tokenizer.all_special_ids[-3]  # <|startofprev|>
-    prompt_cutoff_length = max_label_length // 2
+    decoder_start_token_id = student_model.config.decoder_start_token_id  # <|startoftranscript|> 50258
+    decoder_prev_token_id = tokenizer.all_special_ids[-3]  # <|startofprev|> 50362
+    prompt_cutoff_length = max_label_length // 2 # 448//2=224
 
     num_workers = data_args.preprocessing_num_workers
     dataloader_num_workers = training_args.dataloader_num_workers
     prefetch_factor = training_args.dataloader_prefetch_factor
 
-    metric = evaluate.load("wer")
+    #metric = evaluate.load("wer")
+    metric = evaluate.load("cer") # TODO use "cer" for ja asr
     normalizer = (
         BasicTextNormalizer()
         if data_args.language is not None
         else EnglishTextNormalizer(tokenizer.english_spelling_normalizer)
     )
-    wer_threshold = data_args.wer_threshold
-    use_pseudo_labels = data_args.use_pseudo_labels
+    wer_threshold = data_args.wer_threshold # 20.0 (20.0/100.0=0.2 for cer is fine)
+    use_pseudo_labels = data_args.use_pseudo_labels # True
     train_text_column_name = "whisper_transcript" if use_pseudo_labels else "text"
 
     # 10.2: filter based on maximum number of training/evaluation samples NOTE 根据最大的训练/
@@ -1160,6 +1177,7 @@ def main():
         elif len(norm_ground_truth) > 0 and whisper_transcript is not None:
             norm_whisper_transcript = normalizer(whisper_transcript)
             wer = 100 * metric.compute(predictions=[norm_whisper_transcript], references=[norm_ground_truth])
+            #print(norm_whisper_transcript, '\n', norm_ground_truth, '\n', wer)
             return wer < wer_threshold
         else:
             # filter automatically since we can't know the WER
@@ -1170,6 +1188,7 @@ def main():
         function=is_wer_in_range,
         input_columns=["text", "whisper_transcript"],
     )
+    #import ipdb; ipdb.set_trace()
 
     if wer_threshold is not None and use_pseudo_labels:
         with accelerator.main_process_first():
@@ -1183,18 +1202,18 @@ def main():
     def prepare_train_dataset(batch):
         """
         Pre-process the raw dataset in a three stage process:
-            1. Convert the audio arrays to log-mel spectrogram inputs
+            1. Convert the audio arrays to½C log-mel spectrogram inputs
             2. Possibly filter the timestamp tokens from the token ids (depending on the timestamp probability)
-            3. Possibly add prompt tokens if conditioning on previous text (depending on the conditioning probability)
+            3. Possibly add prompt token½Cs if conditioning on previous text (depending on the conditioning probability)
         """
         # process audio input
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()½C
         audio = [sample["array"] for sample in batch["audio"]]
         inputs = feature_extractor(audio, sampling_rate=sampling_rate)
-        batch["input_features"] = inputs.input_features
+        batch["input_features"] = inputs.input_features # (2½C56=batch.size, 128=feat.dim, 3000=len)
         batch["input_length"] = [len(sample) for sample in audio]
 
-        # process text targets - for training these are the Whisper-generated pseudo-labels
+        # process text targets - for training these are the 
         input_str_batched = batch[train_text_column_name]
         condition_on_prev_batched = batch.get("condition_on_prev", len(input_str_batched) * [None])
 
@@ -1207,15 +1226,15 @@ def main():
             has_timestamps = len(set(token_ids) & set(timestamp_ids)) > 0
             if has_timestamps:
                 # sample from binomial distribution to get probability of training on timestamps
-                predict_timestamps = bool(np.random.binomial(1, timestamp_probability))
+                predict_timestamps = bool(np.random.binomial(1, timestamp_probability)) # NOTE
                 if not predict_timestamps:
                     # filter timestamps and insert the <|notimestamps|> task token
-                    token_ids = [token for token in token_ids if token < timestamp_begin]
+                    token_ids = [token for token in token_ids if token < timestamp_begin] # 0.00 to 30.00 takes token-id of from 50365 to 51865; and timestamp_begin=50364='<|notimestamps|>' NOTE
                     token_ids.insert(timestamp_position, timestamp_begin)
 
             all_token_ids_unprompted.append(token_ids)
             # check whether to condition on previous text - we do this with probability condition_on_prev_probability
-            condition_on_prev = bool(np.random.binomial(1, condition_on_prev_probability))
+            condition_on_prev = bool(np.random.binomial(1, condition_on_prev_probability)) # NOTE
             if not condition_on_prev:
                 prev_ids = None
             elif "condition_on_prev" not in batch and len(all_token_ids_unprompted) > 1:
@@ -1256,7 +1275,7 @@ def main():
         input_str = batch["text"]
         batch["labels"] = tokenizer(input_str).input_ids
         return batch
-
+    #import ipdb; ipdb.set_trace()
     vectorized_datasets = IterableDatasetDict() if data_args.streaming else DatasetDict()
     if training_args.do_train:
         # with streaming mode we can only have 1 worker, whereas with non-streaming
@@ -1352,12 +1371,12 @@ def main():
         # for logging, we need the pred/labels to match the norm_pred/norm_labels, so discard any filtered samples here
         pred_str = [pred_str[i] for i in range(len(norm_pred_str)) if len(norm_label_str[i]) > 0]
         label_str = [label_str[i] for i in range(len(norm_label_str)) if len(norm_label_str[i]) > 0]
-        # filtering step to only evaluate the samples that correspond to non-zero normalized references:
+        # filtering step to only ½Raluate the samples that correspond to non-zero normalized references:
         norm_pred_str = [norm_pred_str[i] for i in range(len(norm_pred_str)) if len(norm_label_str[i]) > 0]
         norm_label_str = [norm_label_str[i] for i in range(len(norm_label_str)) if len(norm_label_str[i]) > 0]
 
         wer = 100 * metric.compute(predictions=norm_pred_str, references=norm_label_str)
-        return {"wer": wer, "wer_ortho": wer_ortho}, pred_str, label_str, norm_pred_str, norm_label_str
+        return {"cer": wer, "wer_ortho": wer_ortho}, pred_str, label_str, norm_pred_str, norm_label_str
 
     # 12. Define Training Schedule NOTE 定义训练日程表
     # Store some constants
@@ -1470,16 +1489,16 @@ def main():
     )
 
     def kl_divergence(target_distribution, log_predicted_distribution, labels):
-        import ipdb; ipdb.set_trace() # NOTE 相当重要的部分，计算KL
+        #import ipdb; ipdb.set_trace() # NOTE 相当重要的部分，计算KL
         kl_loss = nn.KLDivLoss(reduction="none")
-        divergence = kl_loss(log_predicted_distribution, target_distribution)
+        divergence = kl_loss(log_predicted_distribution, target_distribution) # divergence.shape=[32,447,51866]
         # ignore padded tokens from divergence, i.e. where labels are not set to -100
         padding_mask = labels >= 0
         padding_mask = padding_mask.unsqueeze(-1)
         divergence = divergence * padding_mask
         # take the average over the mini-batch
-        divergence = divergence.sum() / padding_mask.sum()
-        return divergence
+        divergence = divergence.sum() / padding_mask.sum() # 分母是有效位置的数量
+        return divergence #tensor(3.1558, device='cuda:0', grad_fn=<DivBackward0>)
 
     # Define gradient update step fn
     def train_step(
@@ -1488,16 +1507,16 @@ def main():
     ):
         student_model.train()
         teacher_model.eval()
+        # batch: 'input_features':[32, 128, 3000], 'labels':[32, 447], 'decoder_input_ids':[32,447]
+        #import ipdb; ipdb.set_trace()
 
-        import ipdb; ipdb.set_trace()
-
-        student_outputs = student_model(**batch)
+        student_outputs = student_model(**batch) # 'loss': tensor(9.4176, device='cuda:0', grad_fn=<NllLossBackward0>); 'logits': [32, 447, 51866]; 'past_key_values': (); 'encoder_last_hidden_state': [32, 1500, 1280]
 
         with torch.no_grad():
-            if share_hidden_states:
+            if share_hidden_states: # True
                 # if the student and teacher share the same frozen encoder then we don't have to recompute the
                 # encoder hidden-states for the teacher model, we can just re-use from the student
-                encoder_outputs = BaseModelOutput(student_outputs.encoder_last_hidden_state.to(dtype=teacher_dtype))
+                encoder_outputs = BaseModelOutput(student_outputs.encoder_last_hidden_state.to(dtype=teacher_dtype)) # encoder_outputs.last_hidden_state.shape=[32,1500,1280]
                 # NOTE 这是直接把学生模型的encoder的输出，赋值给teacher_model作为其encoder_outputs，
                 # 这个好
                 # TODO ,问题在于，这里把labels，传递给教师模型，是个啥意思呢？是要beam search在
@@ -1505,14 +1524,14 @@ def main():
                 teacher_outputs = teacher_model(encoder_outputs=encoder_outputs, labels=batch["labels"])
             else:
                 # do the full forward pass for the teacher model (encoder + decoder)
-                teacher_outputs = teacher_model(**batch) # NOTE TODO 问题，这里咋就没有传入labels=batch['labels']呢?
+                teacher_outputs = teacher_model(**batch) # NOTE TODO 问题，这里咋就没有传入labels=batch['labels']呢? batch=dict_keys(['input_features', 'labels', 'decoder_input_ids']); odict_keys(['loss', 'logits', 'past_key_values', 'encoder_last_hidden_state']) -> 'loss': tensor(1.1336, device='cuda:0'); 'logits': [32,447,51866], 'encoder_last_hidden_state':[32,1500,1280], len(past_key_values)=32, for 32 decoder layers, each layer is with 4 elements -> de's self-attn's key, de's self-attn's value, de's cross-attn's key, de's cross-attn's value NOTE
 
         # CE (data) loss
         ce_loss = student_outputs.loss
         # rescale distribution by temperature to ensure gradients scale correctly
-        teacher_distribution = nn.functional.softmax(teacher_outputs.logits / temperature, dim=-1)
+        teacher_distribution = nn.functional.softmax(teacher_outputs.logits / temperature, dim=-1) # [32, 447, 51866]
         # log softmax of student predictions for numerical stability
-        student_distribution = nn.functional.log_softmax(student_outputs.logits / temperature, dim=-1)
+        student_distribution = nn.functional.log_softmax(student_outputs.logits / temperature, dim=-1) # [32, 447, 51866] TODO why 447???
         # KL-divergence loss (scaled by temperature)
         # TODO 如果想修改为multi-token prediction下的distilling，那么这里是需要修改的
         kl_loss = kl_divergence(teacher_distribution, student_distribution, batch["labels"]) * temperature**2
@@ -1521,7 +1540,7 @@ def main():
         # use Distil-Whisper formulation (fix weight of CE loss and tune KL weight)
         loss = 0.8 * ce_loss + training_args.kl_weight * kl_loss
         metrics = {"loss": loss, "ce_loss": ce_loss, "kl_loss": kl_loss}
-        return loss, metrics
+        return loss, metrics #{'loss': tensor(20.1572, device='cuda:0', grad_fn=<AddBackward0>), 'ce_loss': tensor(9.4176, device='cuda:0', grad_fn=<NllLossBackward0>), 'kl_loss': tensor(12.6231, device='cuda:0', grad_fn=<MulBackward0>)}
 
     # Define eval fn
     def eval_step(batch):
@@ -1670,7 +1689,12 @@ def main():
                     feature_extractor.save_pretrained(intermediate_dir)
                     tokenizer.save_pretrained(intermediate_dir)
                     config.save_pretrained(intermediate_dir)
-                    student_model.generation_config.save_pretrained(intermediate_dir)
+                    if accelerator.is_main_process:
+                        # TODO NOTE why? -> [rank3]: AttributeError: 'DistributedDataParallel' object has no attribute 'generation_config'
+                        #print(student_model)
+                        #print(student_model.__dict__)
+                        #student_model.generation_config.save_pretrained(intermediate_dir)
+                        print('skip the saving of generation_config')
 
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
@@ -1773,7 +1797,7 @@ def main():
                     train_start = time.time()
 
                     # save best checkpoint
-                    numerators = [wer['wer'] * len(labs) for wer, labs in zip(wer_l, labels_l)] 
+                    numerators = [wer['cer'] * len(labs) for wer, labs in zip(wer_l, labels_l)] 
                     val_wer = sum(numerators) / sum(len(labs) for labs in labels_l)
 
                     if val_wer < best_val_wer:
@@ -1783,7 +1807,10 @@ def main():
                         feature_extractor.save_pretrained(intermediate_dir)
                         tokenizer.save_pretrained(intermediate_dir)
                         config.save_pretrained(intermediate_dir)
-                        student_model.generation_config.save_pretrained(intermediate_dir)
+                        if accelerator.is_main_process:
+                            # TODO NOTE why?
+                            #student_model.generation_config.save_pretrained(intermediate_dir)
+                            print('no generation_config, skip its saving')
 
                         accelerator.wait_for_everyone()
 
@@ -1813,7 +1840,10 @@ def main():
                     tokenizer.save_pretrained(final_weights_dir)
                     # save the config and generation config as well
                     config.save_pretrained(final_weights_dir)
-                    student_model.generation_config.save_pretrained(final_weights_dir)
+                    if accelerator.is_main_process:
+                        # TODO NOTE why?
+                        #student_model.generation_config.save_pretrained(final_weights_dir)
+                        print('no generation_config, skip its saving')
 
                     # un-wrap student model for save
                     student_model = accelerator.unwrap_model(student_model)

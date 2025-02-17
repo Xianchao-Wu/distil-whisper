@@ -26,8 +26,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Optional, Tuple, Union
 
-from transformers import GenerationConfig, WhisperForConditionalGeneration, WhisperProcessor
+from transformers import WhisperConfig, GenerationConfig, WhisperForConditionalGeneration, WhisperProcessor
 
 
 logger = logging.getLogger(__name__)
@@ -71,14 +72,12 @@ def parse_args():
     parser.add_argument(
         "--decoder_mtp_n",
         type=int,
-        nargs="*",
         help="Number of tokens to be predicted for multi-token prediction.",
         default=1, # if 1 then only predict the next 1 token; if > 1 then predict next n tokens.
     )
     parser.add_argument(
         "--decoder_mtp_type",
         type=str,
-        nargs="*",
         help="The type of multi-token prediction, parallel heads or causal heads",
         default="parallel",
         choices=["parallel", "causal"]
@@ -135,7 +134,7 @@ class CausalMultiTokenPredictionHead(nn.Module):
         # student_model.model.decoder.embed_tokens -> Embedding(51866, 1280, padding_idx=50256) 
 
         # Final projection to vocabulary logits.
-        self.proj = nn.Linear(hidden_size, vocab_size) # TODO reuse existing head projection
+        self.proj = nn.Linear(hidden_size, vocab_size, bias=False) # TODO reuse existing head projection
         # student_model.proj_out -> Linear(in_features=1280, out_features=51866, bias=False)
 
     def forward(self, encoder_hidden, teacher_tokens=None):
@@ -272,11 +271,11 @@ class MultiTokenPredictionHeadParallel(nn.Module):
         super(MultiTokenPredictionHeadParallel, self).__init__()
         self.num_tokens = num_tokens
         # Project from hidden state to (num_tokens * vocab_size) logits.
-        self.proj = nn.Linear(hidden_size, vocab_size * num_tokens)
+        self.mtp_proj = nn.Linear(hidden_size, vocab_size * num_tokens, bias=False) # Linear(in_features=1280, out_features=155598, bias=False), to 3 heads in parallel
 
     def forward(self, hidden_states):
         # hidden_states shape: (batch_size, seq_len, hidden_size)
-        logits = self.proj(hidden_states)
+        logits = self.mtp_proj(hidden_states)
         # reshape to (batch_size, seq_len, num_tokens, vocab_size)
         batch_size, seq_len, _ = logits.size()
         logits = logits.view(batch_size, seq_len, self.num_tokens, -1)
@@ -305,26 +304,67 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
 
     #def forward(self, input_features):
     # TODO this input shall aline with whisper model's forward()'s input parameters!
-    def forward(self, batch):
+    def forward(
+        self, 
+        input_features: Optional[torch.FloatTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_attention_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        decoder_head_mask: Optional[torch.Tensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
+        past_key_values = None,
+        decoder_inputs_embeds: Optional[Tuple[torch.FloatTensor]] = None,
+        decoder_position_ids: Optional[Tuple[torch.LongTensor]] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+    ):
         # Compute hidden states via the existing encoder
         # TODO 从self.student_model_whisper里面，把encoder给解析出来，
         # 并且拿到hidden_states
         #hidden_states = self.student_model_whisper.model.(input_features)  # shape: (B, T, hidden_size)
         #student_outputs = self.student_model_whisper(**batch) # TODO check batch, line 1494 of 
         # 'run_distillation.py' NOTE
-        student_outputs = super().forward(**batch)
+        #student_outputs = super().forward(**batch)
+        import ipdb; ipdb.set_trace()
+        student_outputs = super().forward(
+            input_features = input_features,
+            attention_mask = attention_mask,
+            decoder_input_ids = decoder_input_ids,
+            decoder_attention_mask = decoder_attention_mask,
+            head_mask = head_mask,
+            decoder_head_mask = decoder_head_mask,
+            cross_attn_head_mask = cross_attn_head_mask,
+            encoder_outputs = encoder_outputs,
+            past_key_values = past_key_values,
+            decoder_inputs_embeds = decoder_inputs_embeds,
+            decoder_position_ids = decoder_position_ids,
+            labels = labels,
+            use_cache = use_cache,
+            output_attentions = output_attentions,
+            output_hidden_states = output_hidden_states,
+            return_dict = return_dict,
+            cache_position = cache_position,
+        )
 
+        import ipdb; ipdb.set_trace()
         # Standard single-token logits (if used for distillation loss, etc.)
         # TODO standard_head?
         #logits = self.student_model_whisper.model.standard_head(hidden_states)     # shape: (B, T, vocab_size)
         logits = student_outputs.logits
 
-        hidden_states = student_outputs.decoder_last_hidden_state # TODO
+        #hidden_states = student_outputs.decoder_last_hidden_state # TODO
+        hidden_states = student_outputs.decoder_hidden_states[-1] # decoder last hidden state
 
         # Also compute multi-token logits:
         mtp_logits = self.mtp_head(hidden_states)        # shape: (B, T, num_mtp_tokens, vocab_size)
         return {"logits": logits, "mtp_logits": mtp_logits}
-
+        # torch.Size([1, 1, 51866]) for logits and torch.Size([1, 1, 3, 51866]) for mtp_logits NOTE
 
 import torch.nn.functional as F
 
@@ -386,6 +426,8 @@ def init_student_model_from_teacher(
     teacher_checkpoint,
     encoder_layers=None,
     decoder_layers=2,
+    decoder_mtp_n=1, # 1 as default
+    decoder_mtp_type='paralle', # 'parallel mtp' as default
     decoder_layers_numbers=None,
     save_dir=None,
     push_to_hub=None,
@@ -406,7 +448,7 @@ def init_student_model_from_teacher(
         low_cpu_mem_usage=True,
     ) # <class 'transformers.models.whisper.modeling_whisper.WhisperForConditionalGeneration'> /usr/local/lib/python3.10/dist-packages/transformers/models/whisper/modeling_whisper.py NOTE
     # 导入教师模型ckpt
-    import ipdb; ipdb.set_trace() 
+    #import ipdb; ipdb.set_trace() 
 
     processor = WhisperProcessor.from_pretrained(teacher_checkpoint)
     generation_config = GenerationConfig.from_pretrained(teacher_checkpoint)
@@ -416,7 +458,7 @@ def init_student_model_from_teacher(
     print('-'*20)
     print(teacher_config)
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
     teacher_encoder_layers = teacher_config.encoder_layers # 32
     teacher_decoder_layers = teacher_config.decoder_layers # 32
@@ -447,32 +489,41 @@ def init_student_model_from_teacher(
         decoder_map[teacher_layer] = student_layer
 
     # init the student params from the teacher model
-    import ipdb; ipdb.set_trace() # 根据学生模型的配置文件，构造学生模型:
+    #import ipdb; ipdb.set_trace() # 根据学生模型的配置文件，构造学生模型:
     # TODO
-    student_model = WhisperForConditionalGeneration(student_config)
+    #student_model = WhisperForConditionalGeneration(student_config)
+    student_model = StudentModelMTPParallel(student_config, decoder_mtp_n)
     # NOTE /usr/local/lib/python3.10/dist-packages/transformers/models/whisper/modeling_whisper.py
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     #student_model_mtp = StudentModelMTP(student_model, student_config, vocab_size=12800, num_mtp_tokens=3)
 
-    import ipdb; ipdb.set_trace() # 根据教师网络的ckpt state dict，构造学生模型的一些位置的参数的取值:
+    #import ipdb; ipdb.set_trace() # 根据教师网络的ckpt state dict，构造学生模型的一些位置的参数的取值:
     missing_keys, unexpected_keys = student_model.load_state_dict(teacher_model.state_dict(), strict=False) # NOTE len(missing_keys)=0, len(unexpected_keys)=720
     if len(missing_keys) > 0:
-        raise RuntimeError(
-            "Error(s) in loading state_dict for WhisperForConditionalGeneration. \n"
-            f"Missing key(s) in state_dict: {missing_keys}"
-        )
+        # NOTE initialize mtp weight and bias by 'proj_out.weight', (no:) 'proj_out.bias'
+        # 3*proj_out.weight -> mtp_proj.weight
+        proj_out_weight = teacher_model.state_dict()['proj_out.weight'] # torch.Size([51866, 1280])
+
+        mtp_proj_weight = torch.cat([proj_out_weight.clone() for _ in range(decoder_mtp_n)], dim=0) # torch.Size([155598, 1280])
+        #student_model.mtp_head.load_state_dict({'mtp_head.mtp_proj.weight': mtp_proj_weight})
+        student_model.mtp_head.mtp_proj.weight = nn.Parameter(mtp_proj_weight) # NOTE
+
+        #raise RuntimeError(
+        #    "Error(s) in loading state_dict for StudentModelMTPParallel(WhisperForConditionalGeneration). \n"
+        #    f"Missing key(s) in state_dict: {missing_keys}"
+        #)
     if decoder_layers == teacher_decoder_layers: # NOTE not in
         decoder_keys = [key for key in unexpected_keys if "model.decoder.layers" in key]
         if len(decoder_keys) > 0:
             raise RuntimeError(
-                "Error(s) in loading state_dict for WhisperForConditionalGeneration. \n"
+                "Error(s) in loading state_dict for StudentModelMTPParallel(WhisperForConditionalGeneration). \n"
                 f"Unexpected key(s) in state_dict: {decoder_keys}"
             )
     if encoder_layers == teacher_encoder_layers:
         encoder_keys = [key for key in unexpected_keys if "model.encoder.layers" in key] # NOTE len(encoder_keys)=0
         if len(encoder_keys) > 0:
             raise RuntimeError(
-                "Error(s) in loading state_dict for WhisperForConditionalGeneration. \n"
+                "Error(s) in loading state_dict for StudentModelMTPParallel(WhisperForConditionalGeneration). \n"
                 f"Unexpected key(s) in state_dict: {encoder_keys}"
             )
         
@@ -494,11 +545,11 @@ def init_student_model_from_teacher(
     # remove the teacher params and model
     del teacher_model
 
-    import ipdb; ipdb.set_trace() # 保存学生模型ckpt到本地的hard space
+    #import ipdb; ipdb.set_trace() # 保存学生模型ckpt到本地的hard space
     # save the converted weights and model
     is_save_student = True #False # NOTE TODO
     if is_save_student and save_dir is not None:
-        import ipdb; ipdb.set_trace() # TODO where is the "save_pretrained" method defined???
+        #import ipdb; ipdb.set_trace() # TODO where is the "save_pretrained" method defined???
         student_model.save_pretrained(save_dir) # > /usr/local/lib/python3.10/dist-packages/transformers/modeling_utils.py(2397) save_pretrained() 'class PreTrainedModel'
         # we also need to correctly save the processor and generation config
         processor.save_pretrained(save_dir)
@@ -506,7 +557,8 @@ def init_student_model_from_teacher(
 
     # check we can do a forward pass with the saved model - first load the weights and processor
     logger.info("Checking we can load the saved model...")
-    student_model = WhisperForConditionalGeneration.from_pretrained(
+    #student_model = WhisperForConditionalGeneration.from_pretrained(
+    student_model = StudentModelMTPParallel.from_pretrained(
         save_dir, # './distil-large-v3-init' or './distil-large-v3-init-debug' > /usr/local/lib/python3.10/dist-packages/transformers/modeling_utils.py(2883) from_pretrained() 
         low_cpu_mem_usage=True,
     )
@@ -517,13 +569,18 @@ def init_student_model_from_teacher(
     decoder_start_token_id = student_model.config.decoder_start_token_id # 50258
     decoder_input_ids = torch.ones((input_features.shape[0], 1), dtype=torch.long) * decoder_start_token_id
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     # do a forward pass - outputs will be gibberish for the initialised model so we can't check them
     # but we make can sure the model runs as expected
     logger.info("Checking if we can run the converted model forward...")
 
-    import ipdb; ipdb.set_trace() # TODO NOTE
-    _ = student_model(input_features, decoder_input_ids=decoder_input_ids).logits # NOTE TODO check the detail of the output of the student model here!
+    #import ipdb; ipdb.set_trace() # TODO NOTE
+    _ = student_model(
+        input_features, 
+        decoder_input_ids=decoder_input_ids,
+        output_hidden_states=True
+    ).logits # NOTE TODO check the detail of the output of the student model here!
+
     '''
     odict_keys(['logits', 'past_key_values', 'encoder_last_hidden_state'])
     ipdb> smout['logits'].shape
@@ -562,13 +619,15 @@ def init_student_model_from_teacher(
 
 if __name__ == "__main__":
     args = parse_args()
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     print(args) # Namespace(teacher_checkpoint='openai/whisper-large-v3', subfolder='', encoder_layers=32, decoder_layers=2, decoder_layers_numbers=None, save_dir='./distil-large-v3-init', push_to_hub=False, cache_dir=None)
 
     init_student_model_from_teacher(
         teacher_checkpoint=args.teacher_checkpoint,
         encoder_layers=args.encoder_layers,
         decoder_layers=args.decoder_layers,
+        decoder_mtp_n=args.decoder_mtp_n,
+        decoder_mtp_type=args.decoder_mtp_type,
         decoder_layers_numbers=args.decoder_layers_numbers,
         save_dir=args.save_dir,
         push_to_hub=args.push_to_hub,
