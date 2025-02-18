@@ -9,15 +9,28 @@
 cache="/workspace/asr/distil-whisper/training/"
 eval_dataset_name="./common_voice_16_1_ja_pseudo_labelled_good" 
 
-outdir=cache+"/distill_output"
+#outdir=cache+"/distill_output"
 
-save_steps=200
+save_steps=10
+workers=1
+bsize=1
 
-#--overwrite_output_dir \
+student_model_dir="./distil-large-v3-init-debug-mtp-en4-de2-parallel-n3"
+outdir="${student_model_dir}-out"
 
-#python -m ipdb run_distillation.py \
-accelerate launch run_distillation.py \
-  --model_name_or_path "./distil-large-v3-init" \
+# TODO shall we control if student_model.encoder is trainable or not?
+#--freeze_encoder \
+
+# TODO decoder's decoder.embed_positions freeze or not?
+#--freeze_embed_positions \
+#--lr_scheduler_type "constant_with_warmup" \
+
+#lrtype="constant_with_warmup"
+lrtype="linear"
+
+#accelerate launch run_distillation.py \
+python -m ipdb run_distillation_mtp_parallel.py \
+  --model_name_or_path ${student_model_dir} \
   --cache_dir $cache \
   --dataset_cache_dir $cache \
   --teacher_model_name_or_path "openai/whisper-large-v3" \
@@ -32,7 +45,7 @@ accelerate launch run_distillation.py \
   --save_steps ${save_steps} \
   --warmup_steps 50 \
   --learning_rate 0.00001 \
-  --lr_scheduler_type "constant_with_warmup" \
+  --lr_scheduler_type ${lrtype} \
   --timestamp_probability 0.2 \
   --condition_on_prev_probability 0.2 \
   --language "ja" \
@@ -41,10 +54,10 @@ accelerate launch run_distillation.py \
   --save_total_limit 1 \
   --max_steps 150000 \
   --wer_threshold 20 \
-  --per_device_train_batch_size 32 \
-  --per_device_eval_batch_size 32 \
-  --dataloader_num_workers 8 \
-  --preprocessing_num_workers 8 \
+  --per_device_train_batch_size ${bsize} \
+  --per_device_eval_batch_size ${bsize} \
+  --dataloader_num_workers ${workers} \
+  --preprocessing_num_workers ${workers} \
   --ddp_timeout 7200 \
   --dtype "bfloat16" \
   --attn_implementation "sdpa" \
@@ -56,6 +69,7 @@ accelerate launch run_distillation.py \
   --predict_with_generate \
   --freeze_encoder \
   --freeze_embed_positions \
+  --overwrite_output_dir \
   --streaming False #\
   #--push_to_hub
 

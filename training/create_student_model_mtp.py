@@ -332,6 +332,7 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
         # 'run_distillation.py' NOTE
         #student_outputs = super().forward(**batch)
         import ipdb; ipdb.set_trace()
+        output_hidden_states = True # force this to be true for mtp's heads
         student_outputs = super().forward(
             input_features = input_features,
             attention_mask = attention_mask,
@@ -350,7 +351,7 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
             output_hidden_states = output_hidden_states,
             return_dict = return_dict,
             cache_position = cache_position,
-        )
+        ) # odict_keys(['loss', 'logits', 'past_key_values', 'encoder_last_hidden_state'])
 
         import ipdb; ipdb.set_trace()
         # Standard single-token logits (if used for distillation loss, etc.)
@@ -363,19 +364,24 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
 
         # Also compute multi-token logits:
         mtp_logits = self.mtp_head(hidden_states)        # shape: (B, T, num_mtp_tokens, vocab_size)
-        return {"logits": logits, "mtp_logits": mtp_logits}
+        return {
+            "logits": logits, 
+            "mtp_logits": mtp_logits,
+            "encoder_last_hidden_state": student_outputs.encoder_last_hidden_state,
+            "loss": student_outputs.loss
+        }
         # torch.Size([1, 1, 51866]) for logits and torch.Size([1, 1, 3, 51866]) for mtp_logits NOTE
 
 import torch.nn.functional as F
 
-def compute_mtp_loss(mtp_logits, target_tokens, num_mtp_tokens):
+def compute_parallel_mtp_loss(mtp_logits, target_tokens, num_mtp_tokens):
     """
     mtp_logits: Tensor of shape (B, T, num_mtp_tokens, vocab_size)
     target_tokens: LongTensor of shape (B, T) containing the ground-truth token indices.
     For causal prediction, at each time step t, we want to predict tokens at positions t+1, ..., t+num_mtp_tokens.
     We thus compute loss only for positions where these targets exist.
     """
-    B, T, num_tokens, vocab_size = mtp_logits.size()
+    B, T, num_tokens, vocab_size = mtp_logits.size() # 1, 447, 3, 51866
     # Ensure that T is long enough
     if T <= num_mtp_tokens:
         return 0.0
@@ -386,9 +392,9 @@ def compute_mtp_loss(mtp_logits, target_tokens, num_mtp_tokens):
     target_seq = []
     for t in range(T - num_mtp_tokens):
         # For position t, slice tokens from t+1 to t+1+num_mtp_tokens
-        target_seq.append(target_tokens[:, t+1 : t+1+num_mtp_tokens])
+        target_seq.append(target_tokens[:, t+1 : t+1+num_mtp_tokens]) # NOTE [tensor([[-100, -100, -100]], device='cuda:0'), tensor([[-100, -100, -100]], device='cuda:0')], t -> t+1, t+2, t+3, next 3 tokens, duplicated? what I want is t -> t+2, t+3, t+4 since t to t+1 is done in main-model already!
     # Stack along the time dimension to form a tensor of shape (B, T - num_mtp_tokens, num_mtp_tokens)
-    target_mtp = torch.stack(target_seq, dim=1)
+    target_mtp = torch.stack(target_seq, dim=1) # -> [1, 444, 3]
 
     # Corresponding predictions: use only the first T - num_mtp_tokens time steps
     pred_mtp = mtp_logits[:, :T - num_mtp_tokens, :, :]  # shape: (B, T - num_mtp_tokens, num_mtp_tokens, vocab_size)
@@ -398,7 +404,39 @@ def compute_mtp_loss(mtp_logits, target_tokens, num_mtp_tokens):
         pred_mtp.reshape(-1, vocab_size),   # (B*(T-num_mtp_tokens)*num_mtp_tokens, vocab_size)
         target_mtp.reshape(-1)                # (B*(T-num_mtp_tokens)*num_mtp_tokens,)
     )
-    return loss
+    return loss # t -> t+1, t+2, t+3
+
+def compute_parallel_mtp_loss2(mtp_logits, target_tokens, num_mtp_tokens):
+    """
+    mtp_logits: Tensor of shape (B, T, num_mtp_tokens, vocab_size)
+    target_tokens: LongTensor of shape (B, T) containing the ground-truth token indices.
+    For causal prediction, at each time step t, we want to predict tokens at positions t+2, ..., t+1+num_mtp_tokens.
+    We thus compute loss only for positions where these targets exist.
+    """
+    B, T, num_tokens, vocab_size = mtp_logits.size() # 1, 447, 3, 51866
+    # Ensure that T is long enough
+    if T <= num_mtp_tokens:
+        return 0.0
+
+    # We only compute multi-token loss for positions 0..T-num_mtp_tokens
+    # For each position t, the targets are tokens at positions t+2 ... t+1+num_mtp_tokens.
+    # Create a target tensor of shape (B, T - num_mtp_tokens-1, num_mtp_tokens)
+    target_seq = []
+    for t in range(T - num_mtp_tokens - 1):
+        # For position t, slice tokens from t+2 to t+2+num_mtp_tokens
+        target_seq.append(target_tokens[:, t+2 : t+2+num_mtp_tokens]) # NOTE [tensor([[-100, -100, -100]], device='cuda:0'), tensor([[-100, -100, -100]], device='cuda:0')], t -> t+1, t+2, t+3, next 3 tokens, duplicated? what I want is t -> t+2, t+3, t+4 since t to t+1 is done in main-model already!
+    # Stack along the time dimension to form a tensor of shape (B, T - num_mtp_tokens, num_mtp_tokens)
+    target_mtp = torch.stack(target_seq, dim=1) # -> [1, 443, 3]
+
+    # Corresponding predictions: use only the first T - num_mtp_tokens time steps
+    pred_mtp = mtp_logits[:, :T - num_mtp_tokens - 1, :, :]  # shape: (B, T - num_mtp_tokens - 1, num_mtp_tokens, vocab_size)
+
+    # Flatten the tensors to compute cross-entropy loss
+    loss = F.cross_entropy(
+        pred_mtp.reshape(-1, vocab_size),   # (B*(T-num_mtp_tokens)*num_mtp_tokens, vocab_size)
+        target_mtp.reshape(-1)                # (B*(T-num_mtp_tokens)*num_mtp_tokens,)
+    )
+    return loss # t -> t+2, t+3, t+4
 
 # In your training step:
 def training_step(batch, model, optimizer, kd_loss_fn, alpha_mtp=0.5):
@@ -414,7 +452,7 @@ def training_step(batch, model, optimizer, kd_loss_fn, alpha_mtp=0.5):
     loss_kd = kd_loss_fn(outputs["logits"], batch["target_tokens"])
 
     # Compute multi-token prediction loss
-    mtp_loss = compute_mtp_loss(outputs["mtp_logits"], batch["target_tokens"], model.num_mtp_tokens)
+    mtp_loss = compute_parallel_mtp_loss(outputs["mtp_logits"], batch["target_tokens"], model.num_mtp_tokens)
     # Combine losses (the weight alpha_mtp can be tuned)
     total_loss = loss_kd + alpha_mtp * mtp_loss
 
@@ -575,11 +613,12 @@ def init_student_model_from_teacher(
     logger.info("Checking if we can run the converted model forward...")
 
     #import ipdb; ipdb.set_trace() # TODO NOTE
-    _ = student_model(
+    sm_out = student_model(
         input_features, 
         decoder_input_ids=decoder_input_ids,
         output_hidden_states=True
-    ).logits # NOTE TODO check the detail of the output of the student model here!
+    ) # NOTE TODO check the detail of the output of the student model here!
+    print(sm_out)
 
     '''
     odict_keys(['logits', 'past_key_values', 'encoder_last_hidden_state'])
