@@ -291,7 +291,8 @@ class MultiTokenPredictionHeadParallel(nn.Module):
 class StudentModelMTPParallel(WhisperForConditionalGeneration):
     #def __init__(self, student_model_whisper, base_config, vocab_size, num_mtp_tokens=3):
     #def __init__(self, config: WhisperConfig, num_mtp_tokens=3):
-    def __init__(self, config: WhisperConfig, num_mtp_tokens=2):
+    #def __init__(self, config: WhisperConfig, num_mtp_tokens=2):
+    def __init__(self, config: WhisperConfig, num_mtp_tokens=4):
         super(StudentModelMTPParallel, self).__init__(config)
         # Suppose self.encoder is the main part of the student (e.g., distilled Whisper encoder)
         #self.encoder = ...  # existing definition
