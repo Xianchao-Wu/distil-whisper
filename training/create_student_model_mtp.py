@@ -29,6 +29,13 @@ import torch.nn.functional as F
 from typing import Optional, Tuple, Union
 
 from transformers import WhisperConfig, GenerationConfig, WhisperForConditionalGeneration, WhisperProcessor
+from dataclasses import dataclass
+
+from transformers.modeling_outputs import Seq2SeqLMOutput
+
+@dataclass
+class MTPSeq2SeqLMOutput(Seq2SeqLMOutput):
+    mtp_logits: torch.FloatTensor = None
 
 
 logger = logging.getLogger(__name__)
@@ -283,7 +290,8 @@ class MultiTokenPredictionHeadParallel(nn.Module):
 
 class StudentModelMTPParallel(WhisperForConditionalGeneration):
     #def __init__(self, student_model_whisper, base_config, vocab_size, num_mtp_tokens=3):
-    def __init__(self, config: WhisperConfig, num_mtp_tokens=3):
+    #def __init__(self, config: WhisperConfig, num_mtp_tokens=3):
+    def __init__(self, config: WhisperConfig, num_mtp_tokens=2):
         super(StudentModelMTPParallel, self).__init__(config)
         # Suppose self.encoder is the main part of the student (e.g., distilled Whisper encoder)
         #self.encoder = ...  # existing definition
@@ -331,7 +339,7 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
         #student_outputs = self.student_model_whisper(**batch) # TODO check batch, line 1494 of 
         # 'run_distillation.py' NOTE
         #student_outputs = super().forward(**batch)
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         output_hidden_states = True # force this to be true for mtp's heads
         student_outputs = super().forward(
             input_features = input_features,
@@ -353,7 +361,7 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
             cache_position = cache_position,
         ) # odict_keys(['loss', 'logits', 'past_key_values', 'encoder_last_hidden_state'])
 
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         # Standard single-token logits (if used for distillation loss, etc.)
         # TODO standard_head?
         #logits = self.student_model_whisper.model.standard_head(hidden_states)     # shape: (B, T, vocab_size)
@@ -364,12 +372,19 @@ class StudentModelMTPParallel(WhisperForConditionalGeneration):
 
         # Also compute multi-token logits:
         mtp_logits = self.mtp_head(hidden_states)        # shape: (B, T, num_mtp_tokens, vocab_size)
-        return {
-            "logits": logits, 
-            "mtp_logits": mtp_logits,
-            "encoder_last_hidden_state": student_outputs.encoder_last_hidden_state,
-            "loss": student_outputs.loss
-        }
+        # TODO change this and follow Seq2SeqLMOutput
+        #return {
+        #    "logits": logits, 
+        #    "mtp_logits": mtp_logits,
+        #    "encoder_last_hidden_state": student_outputs.encoder_last_hidden_state,
+        #    "loss": student_outputs.loss
+        #}
+        return MTPSeq2SeqLMOutput(
+            loss=student_outputs.loss,
+            logits=logits,
+            mtp_logits=mtp_logits,
+            encoder_last_hidden_state=student_outputs.encoder_last_hidden_state,
+        )
         # torch.Size([1, 1, 51866]) for logits and torch.Size([1, 1, 3, 51866]) for mtp_logits NOTE
 
 import torch.nn.functional as F
@@ -531,6 +546,7 @@ def init_student_model_from_teacher(
     # TODO
     #student_model = WhisperForConditionalGeneration(student_config)
     student_model = StudentModelMTPParallel(student_config, decoder_mtp_n)
+    print(student_model)
     # NOTE /usr/local/lib/python3.10/dist-packages/transformers/models/whisper/modeling_whisper.py
     #import ipdb; ipdb.set_trace()
     #student_model_mtp = StudentModelMTP(student_model, student_config, vocab_size=12800, num_mtp_tokens=3)
@@ -599,7 +615,7 @@ def init_student_model_from_teacher(
     student_model = StudentModelMTPParallel.from_pretrained(
         save_dir, # './distil-large-v3-init' or './distil-large-v3-init-debug' > /usr/local/lib/python3.10/dist-packages/transformers/modeling_utils.py(2883) from_pretrained() 
         low_cpu_mem_usage=True,
-    )
+    ) # TODO here something is wrong -> *** ValueError: Trying to set a tensor of shape torch.Size([103732, 1280]) in "weight" (which has shape torch.Size([155598, 1280])), this looks incorrect.
     processor = WhisperProcessor.from_pretrained(save_dir)
 
     # define some random inputs

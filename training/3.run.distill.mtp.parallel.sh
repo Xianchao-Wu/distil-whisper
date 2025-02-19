@@ -11,11 +11,18 @@ eval_dataset_name="./common_voice_16_1_ja_pseudo_labelled_good"
 
 #outdir=cache+"/distill_output"
 
-save_steps=10
-workers=1
-bsize=1
+save_steps=200
+workers=8
+bsize=16
 
-student_model_dir="./distil-large-v3-init-debug-mtp-en4-de2-parallel-n3"
+enlayers=32
+delayers=2
+mtp_type="parallel" # "causal"
+mtp_n=3 # next n token prediction
+
+#outdir="./distil-large-v3-init-debug-mtp-en${enlayers}-de${delayers}-${mtp_type}-n${mtp_n}"
+student_model_dir="./distil-large-v3-init-debug-mtp-en${enlayers}-de${delayers}-${mtp_type}-n${mtp_n}"
+#student_model_dir="./distil-large-v3-init-debug-mtp-en4-de2-parallel-n3"
 outdir="${student_model_dir}-out"
 
 # TODO shall we control if student_model.encoder is trainable or not?
@@ -29,7 +36,9 @@ outdir="${student_model_dir}-out"
 lrtype="linear"
 
 #accelerate launch run_distillation.py \
-python -m ipdb run_distillation_mtp_parallel.py \
+#python -m ipdb run_distillation_mtp_parallel.py \
+#python -m ipdb run_distillation_mtp_parallel.py \
+accelerate launch run_distillation.py \
   --model_name_or_path ${student_model_dir} \
   --cache_dir $cache \
   --dataset_cache_dir $cache \

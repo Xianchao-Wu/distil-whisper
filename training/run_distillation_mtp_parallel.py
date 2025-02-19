@@ -847,7 +847,7 @@ def main():
     logger.info("Training/evaluation parameters %s", training_args)
 
     # 4. Detecting last checkpoint and eventually continue from last checkpoint NOTE 检测是否有已有的ckpt，并继续从其开始继续训练知识整理
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
@@ -861,7 +861,7 @@ def main():
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
     # 5. Handle the repository creation NOTE 如果发布到hf，这里就设定一下，否则本地保存即可
     if accelerator.is_main_process:
@@ -888,7 +888,7 @@ def main():
     # set seed for determinism
     set_seed(training_args.seed)
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if training_args.do_train:
         raw_datasets["train"] = load_multiple_datasets(
             data_args.train_dataset_name, # './common_voice_16_1_ja_pseudo_labelled_good+./common_voice_16_1_ja_pseudo_labelled_good'
@@ -975,7 +975,7 @@ DatasetDict({
 })
     '''
     
-    import ipdb;ipdb.set_trace()
+    #import ipdb;ipdb.set_trace()
     # 7. Load pretrained model, tokenizer, and feature extractor NOTE 导入已训练模型，tokenizer，以及特征提取器
     config = WhisperConfig.from_pretrained(
         (model_args.config_name if model_args.config_name else model_args.model_name_or_path),
@@ -998,7 +998,7 @@ DatasetDict({
         token=model_args.token,
     ) # for student model
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
     # override timestamp tokens until tokenizer issues are fixed in transformers
     timestamps = [AddedToken("<|%.2f|>" % (i * 0.02), lstrip=False, rstrip=False) for i in range(1500 + 1)] # <|0.00|> to <|30.00|>, with 1501 elements in total.
@@ -1008,7 +1008,7 @@ DatasetDict({
     # update the params
     # 导入教师模型：
     # NOTE
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     teacher_model = WhisperForConditionalGeneration.from_pretrained(
         model_args.teacher_model_name_or_path, # 'openai/whisper-large-v3'
         cache_dir=model_args.cache_dir, # '/workspace/asr/distil-whisper/training/'
@@ -1021,7 +1021,7 @@ DatasetDict({
 
     # 导入学生模型：
     # NOTE
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     student_model = StudentModelMTPParallel.from_pretrained(
         model_args.model_name_or_path, # './distil-large-v3-init'
         config=config,
@@ -1190,7 +1190,7 @@ DatasetDict({
         function=is_wer_in_range,
         input_columns=["text", "whisper_transcript"],
     )
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
     is_skip_wer_filtering = False # for debug since it is too slow here
     if wer_threshold is not None and use_pseudo_labels and not is_skip_wer_filtering:
@@ -1511,7 +1511,7 @@ DatasetDict({
         student_model.train()
         teacher_model.eval()
         # batch: 'input_features':[32, 128, 3000], 'labels':[32, 447], 'decoder_input_ids':[32,447]
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
 
         student_outputs = student_model(**batch) # 'loss': tensor(9.4176, device='cuda:0', grad_fn=<NllLossBackward0>); 'logits': [32, 447, 51866]; 'past_key_values': (); 'encoder_last_hidden_state': [32, 1500, 1280]
 
@@ -1519,7 +1519,7 @@ DatasetDict({
             if share_hidden_states: # True
                 # if the student and teacher share the same frozen encoder then we don't have to recompute the
                 # encoder hidden-states for the teacher model, we can just re-use from the student
-                encoder_outputs = BaseModelOutput(student_outputs['encoder_last_hidden_state'].to(dtype=teacher_dtype)) # encoder_outputs.last_hidden_state.shape=[32,1500,1280]
+                encoder_outputs = BaseModelOutput(student_outputs.encoder_last_hidden_state.to(dtype=teacher_dtype)) # encoder_outputs.last_hidden_state.shape=[32,1500,1280]
                 # NOTE 这是直接把学生模型的encoder的输出，赋值给teacher_model作为其encoder_outputs，
                 # 这个好
                 # TODO ,问题在于，这里把labels，传递给教师模型，是个啥意思呢？是要beam search在
@@ -1530,16 +1530,16 @@ DatasetDict({
                 teacher_outputs = teacher_model(**batch) # NOTE TODO 问题，这里咋就没有传入labels=batch['labels']呢? batch=dict_keys(['input_features', 'labels', 'decoder_input_ids']); odict_keys(['loss', 'logits', 'past_key_values', 'encoder_last_hidden_state']) -> 'loss': tensor(1.1336, device='cuda:0'); 'logits': [32,447,51866], 'encoder_last_hidden_state':[32,1500,1280], len(past_key_values)=32, for 32 decoder layers, each layer is with 4 elements -> de's self-attn's key, de's self-attn's value, de's cross-attn's key, de's cross-attn's value NOTE
 
         # CE (data) loss
-        ce_loss = student_outputs["loss"]
+        ce_loss = student_outputs.loss
         mtp_ce_loss = compute_parallel_mtp_loss(
-            student_outputs["mtp_logits"],
+            student_outputs.mtp_logits,
             batch['labels'],
             student_model.num_mtp_tokens,
         )
         # rescale distribution by temperature to ensure gradients scale correctly
         teacher_distribution = nn.functional.softmax(teacher_outputs.logits / temperature, dim=-1) # [32, 447, 51866]
         # log softmax of student predictions for numerical stability
-        student_distribution = nn.functional.log_softmax(student_outputs['logits'] / temperature, dim=-1) # [32, 447, 51866] TODO why 447???
+        student_distribution = nn.functional.log_softmax(student_outputs.logits / temperature, dim=-1) # [32, 447, 51866] TODO why 447??? -> [0, t-2] predicts [1, t-1], 447=448-1
         # KL-divergence loss (scaled by temperature)
         # TODO 如果想修改为multi-token prediction下的distilling，那么这里是需要修改的
         kl_loss = kl_divergence(teacher_distribution, student_distribution, batch["labels"]) * temperature**2
@@ -1558,16 +1558,16 @@ DatasetDict({
         with torch.no_grad():
             student_outputs = student_model(**batch)
             if share_hidden_states:
-                encoder_outputs = BaseModelOutput(student_outputs['encoder_last_hidden_state'].to(dtype=teacher_dtype))
+                encoder_outputs = BaseModelOutput(student_outputs.encoder_last_hidden_state.to(dtype=teacher_dtype))
                 teacher_outputs = teacher_model(encoder_outputs=encoder_outputs, labels=batch["labels"])
             else:
                 teacher_outputs = teacher_model(**batch)
 
         # CE (data) loss
-        ce_loss = student_outputs['loss']
+        ce_loss = student_outputs.loss
 
         # log softmax / softmax for numerical stability
-        student_distribution = nn.functional.log_softmax(student_outputs['logits'], dim=-1)
+        student_distribution = nn.functional.log_softmax(student_outputs.logits, dim=-1)
         teacher_distribution = nn.functional.softmax(teacher_outputs.logits, dim=-1)
         # temperature is always 1 for eval
         kl_loss = kl_divergence(teacher_distribution, student_distribution, batch["labels"])

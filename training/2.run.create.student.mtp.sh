@@ -10,10 +10,10 @@
 
 cache="/workspace/asr/distil-whisper/training/"
 
-enlayers=4
+enlayers=32
 delayers=2
 mtp_type="parallel" # "causal"
-mtp_n=3 # next n token prediction
+mtp_n=2 # next n token prediction
 
 outdir="./distil-large-v3-init-debug-mtp-en${enlayers}-de${delayers}-${mtp_type}-n${mtp_n}"
 
